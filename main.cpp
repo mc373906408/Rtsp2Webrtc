@@ -1,3 +1,4 @@
+#include <string.h>
 #include <stdio.h>
 #include <errno.h>
 extern "C"
@@ -9,20 +10,32 @@ extern "C"
 #include <libavfilter/buffersink.h>
 #include <libavutil/time.h>
 #include <libavutil/audio_fifo.h>
-#include "libswresample/swresample.h"
+#include <libswresample/swresample.h>
+#include <libavutil/opt.h>
 }
 
-// #define Debug
+#define Debug
+// #define CUDA
+
+bool HWDEVICE = false;
 
 struct Runner
 {
     time_t lasttime;
 };
 
-enum AVPixelFormat get_vaapi_format(AVCodecContext *ctx, const enum AVPixelFormat *pix_fmts)
+enum AVPixelFormat get_hwdevice_format(AVCodecContext *ctx, const enum AVPixelFormat *pix_fmts)
 {
     const enum AVPixelFormat *p;
+#ifdef CUDA
+    for (p = pix_fmts; *p != AV_PIX_FMT_NONE; p++)
+    {
+        if (*p == AV_PIX_FMT_CUDA)
+            return *p;
+    }
 
+    av_log(nullptr, AV_LOG_ERROR, "无法使用 CUDA 解码此文件\n");
+#else
     for (p = pix_fmts; *p != AV_PIX_FMT_NONE; p++)
     {
         if (*p == AV_PIX_FMT_VAAPI)
@@ -30,6 +43,7 @@ enum AVPixelFormat get_vaapi_format(AVCodecContext *ctx, const enum AVPixelForma
     }
 
     av_log(nullptr, AV_LOG_ERROR, "无法使用 VA-API 解码此文件\n");
+#endif
 
     return AV_PIX_FMT_NONE;
 }
@@ -110,13 +124,16 @@ int open_input_file(const char *filename, AVFormatContext **ifmt_ctx, int &audio
     (*video_decoder_ctx)->time_base = av_inv_q((*video_decoder_ctx)->framerate);
 
     /*创建硬件设备引用*/
-    (*video_decoder_ctx)->hw_device_ctx = av_buffer_ref(*hw_device_ctx);
-    if (!(*video_decoder_ctx)->hw_device_ctx)
+    if (HWDEVICE)
     {
-        av_log(nullptr, AV_LOG_ERROR, "硬件设备引用创建失败\n");
-        return AVERROR(ENOMEM);
+        (*video_decoder_ctx)->hw_device_ctx = av_buffer_ref(*hw_device_ctx);
+        if (!(*video_decoder_ctx)->hw_device_ctx)
+        {
+            av_log(nullptr, AV_LOG_ERROR, "硬件设备引用创建失败\n");
+            return AVERROR(ENOMEM);
+        }
+        (*video_decoder_ctx)->get_format = get_hwdevice_format;
     }
-    (*video_decoder_ctx)->get_format = get_vaapi_format;
 
     /*打开解码器*/
     ret = avcodec_open2(*video_decoder_ctx, video_decoder, NULL);
@@ -490,9 +507,24 @@ int openVideoFilter(AVCodecContext **video_decoder_ctx, AVFormatContext **ifmt_c
     inputs->next = nullptr;
 
     /*通过解析过滤器字符串添加过滤器*/
-    snprintf(args2, sizeof(args2),
-             "scale_vaapi=w=%d:h=%d",
-             width, height);
+    if ((*video_decoder_ctx)->hw_frames_ctx)
+    {
+#ifdef CUDA
+        snprintf(args2, sizeof(args2),
+                 "scale_npp=w=%d:h=%d",
+                 width, height);
+#else
+        snprintf(args2, sizeof(args2),
+                 "scale_vaapi=w=%d:h=%d",
+                 width, height);
+#endif
+    }
+    else
+    {
+        snprintf(args2, sizeof(args2),
+                 "scale=w=%d:h=%d",
+                 width, height);
+    }
 
     ret = avfilter_graph_parse_ptr(*filter_graph, args2, &inputs, &outputs, nullptr);
     if (ret < 0)
@@ -543,7 +575,7 @@ int videoFilter(AVFrame **frame, AVFilterContext **buffersrc_ctx, AVFilterContex
     return 0;
 }
 
-int video_dec_enc(AVPacket *pkt, AVCodec *video_enc_codec, AVCodecContext **video_decoder_ctx, AVCodecContext **video_encoder_ctx, const int &audio_initialized, int &video_initialized, int &initialized, const char *outUrl, AVStream **video_ost, AVFormatContext **ifmt_ctx, AVFormatContext **ofmt_ctx, const int &in_video_stream, int &out_video_stream, const int &out_audio_stream, AVFilterContext **buffersrc_ctx, AVFilterContext **buffersink_ctx, AVFilterGraph **filter_graph, int64_t &video_last_pts)
+int video_dec_enc(AVPacket *pkt, AVCodec *video_enc_codec, AVBufferRef **hw_device_ctx, AVCodecContext **video_decoder_ctx, AVCodecContext **video_encoder_ctx, const int &audio_initialized, int &video_initialized, int &initialized, const char *outUrl, AVStream **video_ost, AVFormatContext **ifmt_ctx, AVFormatContext **ofmt_ctx, const int &in_video_stream, int &out_video_stream, const int &out_audio_stream, AVFilterContext **buffersrc_ctx, AVFilterContext **buffersink_ctx, AVFilterGraph **filter_graph, int64_t &video_last_pts)
 {
     AVFrame *frame;
     int ret = 0;
@@ -595,26 +627,37 @@ int video_dec_enc(AVPacket *pkt, AVCodec *video_enc_codec, AVCodecContext **vide
                 width = (*video_decoder_ctx)->width;
                 height = (*video_decoder_ctx)->height;
             }
-            /*滤镜初始化*/
-            *filter_graph = avfilter_graph_alloc();
 
-            ret = openVideoFilter(video_decoder_ctx, ifmt_ctx, in_video_stream, buffersrc_ctx, buffersink_ctx, filter_graph, width, height);
-            if (ret < 0)
-            {
-                goto fail;
-            }
             /*我们需要引用解码器的 hw_frames_ctx 来初始化编码器的编解码器。只有得到解码后的帧，才能得到它的hw_frames_ctx*/
-            (*video_encoder_ctx)->hw_frames_ctx = av_buffer_ref((*video_decoder_ctx)->hw_frames_ctx);
-            if (!(*video_encoder_ctx)->hw_frames_ctx)
+            if (HWDEVICE)
             {
-                ret = AVERROR(ENOMEM);
-                goto fail;
+                (*video_encoder_ctx)->hw_frames_ctx = av_buffer_ref((*video_decoder_ctx)->hw_frames_ctx);
+                if (!(*video_encoder_ctx)->hw_frames_ctx)
+                {
+                    ret = AVERROR(ENOMEM);
+                    goto fail;
+                }
             }
+
             /*为编码器设置 AVCodecContext 参数，这里我们保留它们与解码器相同,降低分辨率*/
             (*video_encoder_ctx)->framerate = (*video_decoder_ctx)->framerate;
             (*video_encoder_ctx)->time_base = av_inv_q((*video_decoder_ctx)->framerate);
-            (*video_encoder_ctx)->pix_fmt = AV_PIX_FMT_VAAPI;
             (*video_encoder_ctx)->width = width;
+            if (HWDEVICE)
+            {
+#ifdef CUDA
+                (*video_encoder_ctx)->pix_fmt = AV_PIX_FMT_CUDA;
+#else
+                (*video_encoder_ctx)->pix_fmt = AV_PIX_FMT_VAAPI;
+#endif
+            }
+            else
+            {
+                (*video_encoder_ctx)->pix_fmt = AV_PIX_FMT_YUV420P;
+                /*使用Baseline Profile + Level 3.1编码*/
+                av_opt_set((*video_encoder_ctx)->priv_data, "profile", "baseline", AV_OPT_SEARCH_CHILDREN);
+                av_opt_set((*video_encoder_ctx)->priv_data, "level", "31", AV_OPT_SEARCH_CHILDREN);
+            }
             (*video_encoder_ctx)->height = height;
 
             /*禁用B帧*/
@@ -664,6 +707,16 @@ int video_dec_enc(AVPacket *pkt, AVCodec *video_enc_codec, AVCodecContext **vide
                 av_log(nullptr, AV_LOG_ERROR, "video 无法复制流参数。,%s\n", errStr);
                 goto fail;
             }
+
+            /*滤镜初始化*/
+            *filter_graph = avfilter_graph_alloc();
+
+            ret = openVideoFilter(video_decoder_ctx, ifmt_ctx, in_video_stream, buffersrc_ctx, buffersink_ctx, filter_graph, width, height);
+            if (ret < 0)
+            {
+                goto fail;
+            }
+
             video_initialized = 1;
         }
 
@@ -872,7 +925,8 @@ int interruptCallback(void *_input_runner)
 int main(int argc, char **argv)
 {
 #ifdef Debug
-    av_log_set_level(AV_LOG_DEBUG);
+    // av_log_set_level(AV_LOG_DEBUG);
+    av_log_set_level(AV_LOG_INFO);
 #else
     av_log_set_level(AV_LOG_INFO);
     if (argc < 6)
@@ -880,6 +934,11 @@ int main(int argc, char **argv)
         av_log(nullptr, AV_LOG_ERROR, "参数太少,请调用start.sh启动\n");
         return -1;
     }
+    if (strcasecmp(argv[7], "Y") == 0)
+    {
+        HWDEVICE = true;
+    }
+
 #endif
 
     int ret = 0;
@@ -940,10 +999,12 @@ int main(int argc, char **argv)
 
     /*输入*/
 #ifdef Debug
-    const char *rtspUrl = "rtsp://admin:Admin123@192.168.0.232:554/ch01.264";
+    // const char *rtspUrl = "rtsp://admin:Admin123@192.168.0.232:554/ch01.264";
     // const char *rtspUrl = "rtsp://192.168.0.227/LiveMedia/ch1/Media1";
+    const char *rtspUrl = "rtsp://admin:Admin123@192.168.0.232:554/ch01.264";
 #else
     const char *rtspUrl = argv[1];
+
 #endif
 
 /*输出*/
@@ -952,19 +1013,33 @@ int main(int argc, char **argv)
 //
 // const char *rtpUrl = "[select=v:f=rtp:ssrc=2222:payload_type=101]rtp://192.168.0.20:49948?rtcpport=42188";
 #ifdef Debug
-    const char *rtpUrl = "[select=a:f=rtp:ssrc=1111:payload_type=100]rtp://192.168.0.20:40058?rtcpport=42529|[select=v:f=rtp:ssrc=2222:payload_type=101]rtp://192.168.0.20:45978?rtcpport=45375";
+    const char *rtpUrl = "[select=a:f=rtp:ssrc=1111:payload_type=100]rtp://192.168.0.11:51445?rtcpport=54097|[select=v:f=rtp:ssrc=2222:payload_type=101]rtp://192.168.0.11:61437?rtcpport=59064";
 #else
     char rtpUrl[512];
 #endif
 
     /*打开硬件设备*/
-    ret = av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI, nullptr, nullptr, 0);
-    if (ret < 0)
+    if (HWDEVICE)
     {
-        char errStr[256] = {0};
-        av_strerror(ret, errStr, sizeof(errStr));
-        av_log(nullptr, AV_LOG_ERROR, "创建 VAAPI 设备失败,%s\n", errStr);
-        return -1;
+#ifdef CUDA
+        ret = av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, nullptr, nullptr, 0);
+        if (ret < 0)
+        {
+            char errStr[256] = {0};
+            av_strerror(ret, errStr, sizeof(errStr));
+            av_log(nullptr, AV_LOG_ERROR, "创建 CUDA 设备失败,%s\n", errStr);
+            return -1;
+        }
+#else
+        ret = av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI, nullptr, nullptr, 0);
+        if (ret < 0)
+        {
+            char errStr[256] = {0};
+            av_strerror(ret, errStr, sizeof(errStr));
+            av_log(nullptr, AV_LOG_ERROR, "创建 VAAPI 设备失败,%s\n", errStr);
+            return -1;
+        }
+#endif
     }
 
     /*分配解码包*/
@@ -1010,7 +1085,19 @@ int main(int argc, char **argv)
     }
 
     /*打开编码器*/
-    video_enc_codec = avcodec_find_encoder_by_name("h264_vaapi");
+    if (HWDEVICE)
+    {
+#ifdef CUDA
+        video_enc_codec = avcodec_find_encoder_by_name("h264_nvenc");
+#else
+        video_enc_codec = avcodec_find_encoder_by_name("h264_vaapi");
+#endif
+    }
+    else
+    {
+        video_enc_codec = avcodec_find_encoder(AV_CODEC_ID_H264);
+    }
+
     if (!video_enc_codec)
     {
         av_log(nullptr, AV_LOG_ERROR, "video 创建编码器失败\n");
@@ -1079,7 +1166,7 @@ int main(int argc, char **argv)
         /*视频包*/
         if (in_video_stream == dec_pkt->stream_index)
         {
-            ret = video_dec_enc(dec_pkt, video_enc_codec, &video_decoder_ctx, &video_encoder_ctx, audio_initialized, video_initialized, initialized, rtpUrl, &video_ost, &ifmt_ctx, &ofmt_ctx, in_video_stream, out_video_stream, out_audio_stream, &buffersrc_ctx, &buffersink_ctx, &filter_graph, video_last_pts);
+            ret = video_dec_enc(dec_pkt, video_enc_codec, &hw_device_ctx, &video_decoder_ctx, &video_encoder_ctx, audio_initialized, video_initialized, initialized, rtpUrl, &video_ost, &ifmt_ctx, &ofmt_ctx, in_video_stream, out_video_stream, out_audio_stream, &buffersrc_ctx, &buffersink_ctx, &filter_graph, video_last_pts);
             if (ret < 0)
             {
                 /*没有数据送入但是可以解析下一次*/

@@ -1,18 +1,20 @@
 #!/bin/bash
 echo "准备将摄像机加入房间,请先确保房间已经创建"
 # echo "请输入mediasoup服务器url地址(例:192.168.0.20):"
-# read ANNOUNCED_IP
+# read LAN_IP
+echo "是否启动硬件解码(Y/N)"
+read HWDEVICE
 echo "请输入房间ID(例:wq8ihbhz):"
 read ROOM_ID
 echo "请输入摄像机rtsp地址(例:rtsp://admin:Admin123@192.168.0.232:554/ch01.264):"
 read RTSP_URL
 
 
-# ANNOUNCED_IP=192.168.0.30
+# LAN_IP=192.168.0.30
 # ROOM_ID=ifiuvv6s
 # RTSP_URL=rtsp://admin:Admin123@192.168.0.232:554/ch01.264
 
-SERVER_URL="https://${ANNOUNCED_IP}:4443"
+SERVER_URL="https://${LAN_IP}:4443"
 
 BROADCASTER_ID=$(LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | fold -w ${1:-32} | head -n 1)
 # BROADCASTER_ID="DMokG1qBxRC1WGbuLr1AopJlFBLfu23R"
@@ -71,4 +73,4 @@ echo "音频rtp端口:${audioTransportPort} 音频rtcp端口:${audioTransportRtc
 echo "视频rtp端口:${videoTransportPort} 视频rtcp端口:${videoTransportRtcpPort}"
 
 echo "打开摄像机"
-./rtsp_demo ${RTSP_URL} ${ANNOUNCED_IP} ${audioTransportPort} ${audioTransportRtcpPort} ${videoTransportPort} ${videoTransportRtcpPort}
+./rtsp_demo ${RTSP_URL} ${LAN_IP} ${audioTransportPort} ${audioTransportRtcpPort} ${videoTransportPort} ${videoTransportRtcpPort} ${HWDEVICE}

@@ -1,13 +1,9 @@
-<!-- ./configure --arch=x86_64 --disable-yasm --enable-vaapi --enable-libmfx  --enable-libfdk_aac --enable-demuxer=rtsp
-
-./configure --arch=x86_64 --disable-yasm --enable-vaapi --enable-libmfx  --enable-libfdk_aac --enable-demuxer=rtsp --enable-debug --disable-asm --disable-optimizations --disable-stripping
-
-./configure --arch=x86_64 --disable-yasm --enable-vaapi --enable-libmfx  --enable-libfdk_aac --enable-demuxer=rtsp --enable-debug --disable-asm -->
-
-
-
 # ffmpeg动态库
 ./configure --prefix=./build --arch=x86_64 --disable-x86asm --enable-vaapi --enable-libfdk_aac --enable-libopus --enable-shared --disable-static
+
+
+./configure --prefix=./build --arch=x86_64 --enable-nonfree --enable-gpl --enable-version3 --disable-doc --disable-debug --enable-vaapi --enable-cuda-nvcc --enable-libnpp --extra-cflags=-I/usr/local/cuda/include --extra-ldflags=-L/usr/local/cuda/lib64 --enable-libx264 --enable-libx265 --enable-libfdk_aac --enable-libopus --enable-shared --disable-static
+
 
 make -j16
 make DESTDIR=./build install

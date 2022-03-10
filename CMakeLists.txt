@@ -24,9 +24,17 @@ include_directories(3rd/live555/groupsock/include)
 include_directories(3rd/live555/liveMedia/include)
 include_directories(3rd/live555/UsageEnvironment/include)
 
+# 导入主项目的头文件
+include_directories(include)
 
-# 主函数
+# # 导入主项目的cpp文件
+# FILE(GLOB SOURCES "src/*.cpp")
+# # 主函数
+# add_executable(${PROJECT_NAME} ${SOURCES})
+
+# 测试代码
 add_executable(${PROJECT_NAME} main.cpp)
+
 
 # 链接ffmpeg
 target_link_libraries(${PROJECT_NAME} libavutil.so libavcodec.so libavformat.so libavdevice.so libavfilter.so libswscale.so libswresample.so)
@@ -51,3 +59,4 @@ file(COPY ${FFMPEG_LIBS_DIR} DESTINATION ffmpeglib FOLLOW_SYMLINK_CHAIN)
 file(COPY doc/install_ffmpeg.sh DESTINATION ./ FOLLOW_SYMLINK_CHAIN)
 
 file(COPY doc/start_ffmpeg.sh DESTINATION ./ FOLLOW_SYMLINK_CHAIN)
+
