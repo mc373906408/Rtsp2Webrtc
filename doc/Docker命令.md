@@ -11,7 +11,8 @@ docker load -i webrtc_docker.tar
 ### intel gpu 命令
 - LAN要改成本机局域网IP
 - ANNOUNCED_IP要改成公网IP
-   - docker stop webrtc && docker rm webrtc && docker run -itd --privileged --device=/dev/dri --net=host -e LAN_IP=192.168.0.11 -e ANNOUNCED_IP=192.168.0.11 --name webrtc webrtc 
+   - docker stop webrtc && docker rm webrtc && docker run -itd --privileged --device=/dev/dri --net=host -e LAN_IP=192.168.0.11 -e ANNOUNCED_IP=zkteco.uuui.icu --name webrtc webrtc 
+   <!-- docker stop middleware_demo1 && docker rm middleware_demo1 && docker run -itd --privileged --device=/dev/dri --net=host -e LAN_IP=192.168.0.11 -e ANNOUNCED_IP=zkteco.uuui.icu --name middleware_demo1 middleware_demo1  -->
 ### nvidia gpu 命令
 - LAN要改成本机局域网IP
 - ANNOUNCED_IP要改成公网ip

@@ -12,7 +12,7 @@ make DESTDIR=./build install
 ldd
 
 # 修改ffmpeg链接库
-patchelf --set-rpath /usr/local/ffmpeglib *
+patchelf --set-rpath /usr/local/webrtclib *
 
 # H265转H264
 ffmpeg -re -hwaccel qsv -c:v hevc_qsv  -i video-h265.mkv -vf 'scale_qsv=640:-1' -c:v h264_qsv -acodec copy -f flv rtmp://localhost/live/livestream

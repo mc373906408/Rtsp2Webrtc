@@ -8,19 +8,27 @@ ARG DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
 
 # 安装环境
-# RUN sed -i s@/archive.ubuntu.com/@/mirrors.aliyun.com/@g /etc/apt/sources.list
-# RUN apt clean
+RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
+RUN sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
+RUN apt clean
 RUN apt update
+# 更新所有库
+RUN apt upgrade -y
+# add-apt-repository
+RUN apt install -y software-properties-common
 # gcc g++ make 
 RUN apt install -y build-essential 
+# gcc-11 g++-11
+RUN add-apt-repository ppa:ubuntu-toolchain-r/test && \
+    apt-get install -y gcc-11 g++-11
 # vim
 RUN apt install -y vim
 # libssl
 RUN apt install -y libssl-dev
 # wget
 RUN apt install -y wget
-# add-apt-repository
-RUN apt install -y software-properties-common
+# htop
+RUN apt install -y htop
 
 # intel
 RUN \
@@ -68,22 +76,28 @@ RUN apt install -y python3 && \
     pip install --upgrade pip && \
     pip install launchpadlib 
 
+# 更新所有库
+RUN apt upgrade -y
+
 # pm2
 RUN npm install -g pm2
 # gulp
 RUN npm install -g gulp
 
+# lspci
+RUN apt install -y pciutils
+
 # 拷贝文件
-# ffmpeg
-COPY 3rd/ffmpeg/lib/ /usr/local/ffmpeglib
+COPY 3rd/ffmpeg/lib/ /usr/local/webrtclib
+COPY 3rd/RTSP/lib/ /usr/local/webrtclib
 
 # mediasoup-demo
 COPY mediasoup-demo/ /webrtc/mediasoup-demo
-RUN cd /webrtc/mediasoup-demo/app && npm install
 RUN cd /webrtc/mediasoup-demo/server && npm install 
+RUN cd /webrtc/mediasoup-demo/app && npm install
 
 # rtsp_demo
-COPY build/rtsp_demo /webrtc
+COPY build/src/bin/ /webrtc
 
 # coturn配置
 RUN echo "TURNSERVER_ENABLED=1" >> /etc/default/coturn
